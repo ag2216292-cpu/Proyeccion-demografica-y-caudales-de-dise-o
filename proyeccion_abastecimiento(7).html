@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Abastecimiento de Agua – Proyección Poblacional</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+body{font-family:Arial,sans-serif;margin:0;background:#eef3f8;color:#222}
+header{background:#1F4E78;color:#fff;padding:12px 24px;display:flex;align-items:center;gap:16px}
+#logo{height:56px;background:#fff;border-radius:6px;padding:4px 8px;cursor:pointer}#logoTxt{background:#fff;color:#004270;font-weight:bold;font-size:22px;border-radius:6px;padding:8px 12px;border-bottom:4px solid #94742A;cursor:pointer}header h1{margin:0;font-size:22px}
+.tabs{display:flex;gap:4px;padding:12px 24px 0}.tabs button{padding:10px 18px;border:0;background:#c9d8e8;cursor:pointer;border-radius:6px 6px 0 0;font-weight:bold}
+.tabs button.on{background:#fff;color:#1F4E78}
+.pane{display:none;background:#fff;margin:0 24px 24px;padding:20px;border-radius:0 8px 8px 8px}.pane.on{display:block}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+label{font-size:13px;font-weight:bold;display:block;margin-bottom:4px}
+input,select{width:100%;padding:8px;border:1px solid #aaa;border-radius:4px;background:#FFF2CC;box-sizing:border-box}
+.chk label{display:inline;font-weight:normal;margin-right:14px}.chk input{width:auto}
+table{border-collapse:collapse;width:100%;margin-top:10px;font-size:13px}th{background:#1F4E78;color:#fff;padding:6px}td{border:1px solid #ccc;padding:5px;text-align:center}
+td.e{background:#FFF2CC}td input{background:transparent;border:0;text-align:center;padding:2px}
+.btn{background:#1F4E78;color:#fff;border:0;padding:9px 16px;border-radius:5px;cursor:pointer;margin:10px 6px 0 0}
+.box{height:380px;margin-top:14px}.res{background:#DDEBF7;padding:10px;border-radius:6px;margin-top:10px}
+.note{font-size:12px;color:#555;font-style:italic}.scroll{max-height:320px;overflow:auto}
+</style></head><body>
+<header>
+ <img id="logo" src="logo_utpl.png" alt="UTPL" title="Clic para cambiar el logo" onclick="$('lf').click()" onerror="this.style.display='none';$('logoTxt').style.display='block'">
+ <span id="logoTxt" style="display:none" title="Clic para cargar el logo de la UTPL" onclick="$('lf').click()">UTPL</span>
+ <input type="file" id="lf" accept="image/*" style="display:none" onchange="setLogo(this)">
+ <h1>💧 Abastecimiento de Agua Potable – Proyección y Caudales de Diseño</h1></header>
+<div class="tabs"><button class="on" onclick="tab(0)">📥 Datos</button><button onclick="tab(1)">📈 Proyección</button><button onclick="tab(2)">📊 Comparación de normativas</button></div>
+
+<div class="pane on">
+ <div class="grid">
+  <div><label>País / Normativa</label><select id="pais"></select></div>
+  <div><label>Clima</label><select id="clima"><option>Frío</option><option selected>Templado</option><option>Cálido</option></select></div>
+  <div><label>Población inicial P0 (hab)</label><input id="p0" type="number" value="35240"></div>
+  <div><label>Año base</label><input id="a0" type="number" value="2022"></div>
+  <div><label>Período de diseño (años)</label><input id="n" type="number" value="30" min="1" max="50"></div>
+  <div><label>Tasa de crecimiento r (%)</label><input id="r" type="number" value="1.23" step="0.01"></div>
+ </div>
+ <h3>Censos (opcional)</h3>
+ <p class="chk"><label><input type="checkbox" id="uc" onchange="$('cz').style.display=this.checked?'grid':'none'"> Calcular la tasa r a partir de dos censos</label></p>
+ <div class="grid" id="cz" style="display:none">
+  <div><label>Año censo anterior</label><input id="cay" type="number" placeholder="ej. 2010"></div>
+  <div><label>Población censo anterior (hab)</label><input id="cap" type="number"></div>
+  <div><label>Año censo más reciente</label><input id="cry" type="number" placeholder="ej. 2022"></div>
+  <div><label>Población censo más reciente (hab)</label><input id="crp" type="number"></div>
+ </div>
+ <p class="note">Si se activa, cada método usa su propia tasa calculada con los censos, y P0 y año base pasan a ser los del censo más reciente.</p>
+ <p class="chk"><b>Métodos:</b>
+  <label><input type="checkbox" class="m" value="Aritmético" checked> Aritmético</label>
+  <label><input type="checkbox" class="m" value="Geométrico" checked> Geométrico</label>
+  <label><input type="checkbox" class="m" value="Exponencial" checked> Exponencial</label>
+  <label><input type="checkbox" class="m" value="Wappus" checked> Wappus</label></p>
+ <h3>Parámetros de normativa (editables – verificar con la norma oficial)</h3>
+ <table><thead><tr><th>País</th><th>Norma</th><th>Dot. Frío</th><th>Dot. Templado</th><th>Dot. Cálido</th><th>K1</th><th>K2</th></tr></thead><tbody id="tn"></tbody></table>
+ <p class="note">Bolivia: K1 y K2 se asignan automáticamente según la población de diseño (tabla NB 689). Dotaciones en L/hab·día.</p>
+ <button class="btn" onclick="calc();tab(1)">Calcular ▶</button>
+</div>
+
+<div class="pane">
+ <div class="res" id="res"></div>
+ <div class="box"><canvas id="g1"></canvas></div>
+ <button class="btn" onclick="dl('g1','proyeccion_poblacional.png')">📥 Descargar gráfico PNG</button>
+ <button class="btn" onclick="xls()">📊 Exportar a Excel</button>
+ <button class="btn" onclick="csv()">📥 Descargar tabla CSV</button>
+ <div class="scroll"><table id="tp"></table></div>
+</div>
+
+<div class="pane">
+ <p>Población de diseño usada: <b id="pfc"></b> hab · Clima: <b id="clc"></b></p>
+ <table id="tc"></table>
+ <div class="box"><canvas id="g2"></canvas></div>
+ <button class="btn" onclick="dl('g2','comparacion_normativas.png')">📥 Descargar comparación PNG</button>
+ <button class="btn" onclick="xls()">📊 Exportar a Excel</button>
+ <p class="note">Qmd = Pf·Dot/86400 · QMD = K1·Qmd · QMH = K2·Qmd (Ecuador, ex IEOS) o K2·QMD (Bolivia, Colombia, México).</p>
+ <details style="font-size:11px;color:#888;margin-top:6px">
+  <summary style="cursor:pointer">ℹ️ ¿Qué son K1 y K2?</summary>
+  <p style="margin:6px 0 0 14px;line-height:1.5">El consumo de agua varía según el día y la hora, por eso se diseña para los picos de demanda.<br>
+  <b>K1</b> (variación diaria): relación entre el día de máximo consumo del año y el día promedio. QMD = K1·Qmd → captación, conducción y planta de tratamiento.<br>
+  <b>K2</b> (variación horaria): aumento del consumo en la hora pico. QMH = K2·Qmd (Ecuador) o K2·QMD (Bolivia, Colombia, México) → red de distribución.<br>
+  <b>Qmd</b> = Pf·Dotación/86 400 (L/s).</p>
+ </details>
+</div>
+
+<script>
+function setLogo(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{localStorage.setItem('logoUTPL',e.target.result)}catch(_){}showLogo(e.target.result)};r.readAsDataURL(f)}
+function showLogo(src){const l=document.getElementById('logo');l.src=src;l.style.display='block';document.getElementById('logoTxt').style.display='none'}
+document.addEventListener('DOMContentLoaded',()=>{const g=localStorage.getItem('logoUTPL');if(g)showLogo(g)});
+const N=[
+ {p:'Ecuador',n:'CO 10.7-602 / ex IEOS',d:[150,180,220],k1:1.3,k2:2.0,b:'Qmd'},
+ {p:'Bolivia',n:'NB 689',d:[125,175,225],k1:'auto',k2:'auto',b:'QMD'},
+ {p:'Colombia',n:'RAS – Res. 0330/2017',d:[140,130,125],k1:1.3,k2:1.6,b:'QMD'},
+ {p:'México',n:'CONAGUA – MAPAS',d:[150,200,250],k1:1.4,k2:1.55,b:'QMD'}];
+const C={Aritmético:'#3498db',Geométrico:'#2ecc71',Exponencial:'#f39c12',Wappus:'#e74c3c'};
+const $=id=>document.getElementById(id);let g1,g2,rows=[],RES={};
+N.forEach((x,i)=>$('pais').add(new Option(x.p+' – '+x.n,i)));
+$('tn').innerHTML=N.map((x,i)=>`<tr><td>${x.p}</td><td>${x.n}</td>${x.d.map((v,j)=>`<td class="e"><input id="d${i}${j}" value="${v}"></td>`).join('')}
+<td class="e">${x.k1=='auto'?'auto':`<input id="k1${i}" value="${x.k1}">`}</td><td class="e">${x.k2=='auto'?'auto':`<input id="k2${i}" value="${x.k2}">`}</td></tr>`).join('');
+function tab(i){document.querySelectorAll('.tabs button').forEach((b,j)=>b.classList.toggle('on',i==j));document.querySelectorAll('.pane').forEach((p,j)=>p.classList.toggle('on',i==j))}
+function kBol(P){return P<=1000?[1.5,2.2]:P<=5000?[1.4,2.0]:P<=20000?[1.3,1.8]:P<=100000?[1.2,1.6]:[1.2,1.5]}
+const F={Aritmético:(P,r,t)=>P*(1+r*t),Geométrico:(P,r,t)=>P*Math.pow(1+r,t),Exponencial:(P,r,t)=>P*Math.exp(r*t),
+ Wappus:(P,r,t)=>r*100*t<200?P*(200+r*100*t)/(200-r*100*t):null};
+const fmt=(v,d=0)=>v==null?'—':v.toLocaleString('es-EC',{minimumFractionDigits:d,maximumFractionDigits:d});
+function caud(i,Pf,cl){const x=N[i],dot=+$('d'+i+cl).value;let k1,k2;
+ if(x.k1=='auto')[k1,k2]=kBol(Pf);else{k1=+$('k1'+i).value;k2=+$('k2'+i).value}
+ const qmd=Pf*dot/86400,QMD=k1*qmd,QMH=k2*(N[i].b=='Qmd'?qmd:QMD);return{dot,k1,k2,qmd,QMD,QMH}}
+function calc(){
+ let P0=+$('p0').value,a0=+$('a0').value;const n=+$('n').value,r=+$('r').value/100,cl=$('clima').selectedIndex,ip=+$('pais').value;
+ let RT={},cen=false;
+ if($('uc').checked){const ya=+$('cay').value,pa=+$('cap').value,yc=+$('cry').value,pc=+$('crp').value;
+  if(!(pa>0&&pc>0&&yc>ya)){alert('Revise los datos de los censos: poblaciones > 0 y año reciente mayor que el anterior.');return}
+  const dt=yc-ya;RT={Aritmético:(pc-pa)/(pa*dt),Geométrico:Math.pow(pc/pa,1/dt)-1,Exponencial:Math.log(pc/pa)/dt,Wappus:2*(pc-pa)/(dt*(pc+pa))};
+  P0=pc;a0=yc;$('p0').value=pc;$('a0').value=yc;cen=true;
+ }else RT={Aritmético:r,Geométrico:r,Exponencial:r,Wappus:r};
+ const M=[...document.querySelectorAll('.m:checked')].map(c=>c.value);
+ if(!M.length){alert('Seleccione al menos un método');return}
+ rows=[];for(let t=0;t<=n;t++){const o={Año:a0+t};M.forEach(m=>{const v=F[m](P0,RT[m],t);o[m]=v==null?null:Math.round(v)});rows.push(o)}
+ const fin=rows[n],Pf=Math.max(...M.map(m=>fin[m]).filter(v=>v!=null));
+ const q=caud(ip,Pf,cl);
+ $('res').innerHTML=`<b>Normativa:</b> ${N[ip].p} – ${N[ip].n}<br>`+(cen?'<b>Tasas calculadas con censos:</b> '+M.map(m=>`${m} ${fmt(RT[m]*100,3)} %`).join(' · ')+'<br>':`Tasa r = ${fmt(r*100,2)} % (todos los métodos)<br>`)+M.map(m=>`${m} (${a0+n}): <b>${fmt(fin[m])}</b> hab`).join(' · ')+
+ `<br><b>Población de diseño Pf (mayor de los métodos): ${fmt(Pf)} hab</b><br>Dotación ${q.dot} L/hab·día · K1 = ${q.k1} · K2 = ${q.k2}<br>
+ <b>Qmd = ${fmt(q.qmd,2)} L/s · QMD = ${fmt(q.QMD,2)} L/s · QMH = ${fmt(q.QMH,2)} L/s</b>`+
+ (M.includes('Wappus')&&fin.Wappus==null?'<br>⚠️ Wappus no válido: i·t ≥ 200':'');
+ $('tp').innerHTML='<tr><th>Año</th>'+M.map(m=>`<th>${m}</th>`).join('')+'</tr>'+rows.map(o=>`<tr><td>${o.Año}</td>${M.map(m=>`<td>${fmt(o[m])}</td>`).join('')}</tr>`).join('');
+ g1&&g1.destroy();g1=new Chart($('g1'),{type:'line',data:{labels:rows.map(o=>o.Año),datasets:M.map(m=>({label:m,data:rows.map(o=>o[m]),borderColor:C[m],backgroundColor:C[m],pointRadius:2,tension:.1}))},
+  options:{maintainAspectRatio:false,plugins:{title:{display:true,text:'Proyección poblacional – '+N[ip].p},legend:{position:'bottom'}},scales:{x:{title:{display:true,text:'Año'}},y:{title:{display:true,text:'Habitantes'}}}},plugins:[bg]});
+ const Q=N.map((x,i)=>({p:x.p,...caud(i,Pf,cl)}));
+ RES={P0,a0,n,RT,cen,cl:$('clima').value,ip,M,fin,Pf,q,Q};
+ $('pfc').textContent=fmt(Pf);$('clc').textContent=$('clima').value;
+ $('tc').innerHTML='<tr><th>País</th><th>Dotación</th><th>K1</th><th>K2</th><th>Qmd (L/s)</th><th>QMD (L/s)</th><th>QMH (L/s)</th></tr>'+
+  Q.map((x,i)=>`<tr><td>${x.p}</td><td>${x.dot}</td><td>${x.k1}</td><td>${x.k2}</td><td>${fmt(x.qmd,2)}</td><td>${fmt(x.QMD,2)}</td><td>${fmt(x.QMH,2)}</td></tr>`).join('');
+ g2&&g2.destroy();g2=new Chart($('g2'),{type:'bar',data:{labels:Q.map(x=>x.p),datasets:[['Qmd','qmd','#3498db'],['QMD','QMD','#f39c12'],['QMH','QMH','#e74c3c']].map(([l,k,c])=>({label:l,data:Q.map(x=>+x[k].toFixed(2)),backgroundColor:c}))},
+  options:{maintainAspectRatio:false,plugins:{title:{display:true,text:'Comparación de caudales por normativa (Pf = '+fmt(Pf)+' hab)'},legend:{position:'bottom'}},scales:{y:{title:{display:true,text:'L/s'}}}},plugins:[bg]});
+}
+const bg={id:'bg',beforeDraw:c=>{const x=c.ctx;x.save();x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.restore()}};
+function dl(id,f){const a=document.createElement('a');a.href=$(id).toDataURL('image/png');a.download=f;a.click()}
+function xls(){
+ if(typeof XLSX=='undefined'){alert('No se pudo cargar la librería de Excel. Revise su conexión a internet.');return}
+ if(!rows.length){alert('Primero pulse Calcular');return}
+ const R=RES,r2=v=>Math.round(v*100)/100,wb=XLSX.utils.book_new();
+ const d=[['ABASTECIMIENTO DE AGUA – DATOS DE ENTRADA'],[],['Parámetro','Valor','Unidad'],
+  ['País / Normativa',N[R.ip].p+' – '+N[R.ip].n,''],['Clima',R.cl,''],['Población inicial P0',R.P0,'hab'],['Año base',R.a0,'año'],
+  ['Período de diseño',R.n,'años'],['Año de diseño',R.a0+R.n,'año'],['Tasa obtenida de',R.cen?'Censos':'Dato ingresado',''],...R.M.map(m=>['Tasa r '+m,Math.round(R.RT[m]*1e5)/1e3,'%']),['Métodos',R.M.join(', '),''],[],
+  ['RESULTADOS AL AÑO DE DISEÑO'],...R.M.map(m=>['Población '+m,R.fin[m]??'No válido','hab']),
+  ['Población de diseño Pf',R.Pf,'hab'],['Dotación',R.q.dot,'L/hab·día'],['K1',R.q.k1,'-'],['K2',R.q.k2,'-'],
+  ['Qmd',r2(R.q.qmd),'L/s'],['QMD',r2(R.q.QMD),'L/s'],['QMH',r2(R.q.QMH),'L/s']];
+ const w1=XLSX.utils.aoa_to_sheet(d);w1['!cols']=[{wch:28},{wch:34},{wch:12}];XLSX.utils.book_append_sheet(wb,w1,'Datos y resultados');
+ const w2=XLSX.utils.json_to_sheet(rows.map(o=>{const z={Año:o.Año};R.M.forEach(m=>z[m]=o[m]??'');return z}));
+ w2['!cols']=[{wch:8},...R.M.map(()=>({wch:14}))];XLSX.utils.book_append_sheet(wb,w2,'Proyección');
+ const w3=XLSX.utils.json_to_sheet(R.Q.map((x,i)=>({'País':x.p,'Norma':N[i].n,'Dotación (L/hab·día)':x.dot,'K1':x.k1,'K2':x.k2,
+  'Qmd (L/s)':r2(x.qmd),'QMD (L/s)':r2(x.QMD),'QMH (L/s)':r2(x.QMH)})));
+ w3['!cols']=[{wch:10},{wch:24},{wch:20},{wch:6},{wch:6},{wch:11},{wch:11},{wch:11}];XLSX.utils.book_append_sheet(wb,w3,'Comparación normativas');
+ XLSX.writeFile(wb,'proyeccion_abastecimiento.xlsx');
+}
+function csv(){if(!rows.length)return;const k=Object.keys(rows[0]);const t=[k.join(';'),...rows.map(o=>k.map(c=>o[c]??'').join(';'))].join('\n');
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+t],{type:'text/csv'}));a.download='proyeccion.csv';a.click()}
+calc();tab(0);
+</script></body></html>
